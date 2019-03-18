@@ -313,20 +313,20 @@ int x2sys_initialize (struct GMT_CTRL *GMT, char *TAG, char *fname, struct GMT_I
 		X->read_file = &x2sys_read_mgd77ncfile;
 		X->geographic = true;
 		X->geodetic = GMT_IS_0_TO_P360_RANGE;
-		X->dist_flag = 2;	/* Creat circle distances */
+		X->dist_flag = 2;	/* Create circle distances */
 		MGD77_Init (GMT, &M);	/* Initialize MGD77 Machinery */
 	}
 	else if (!strcmp (fname, "gmt") && gmt_M_compat_check (GMT, 4)) {
 		X->read_file = &x2sys_read_gmtfile;
 		X->geographic = true;
 		X->geodetic = GMT_IS_0_TO_P360_RANGE;
-		X->dist_flag = 2;	/* Creat circle distances */
+		X->dist_flag = 2;	/* Create circle distances */
 	}
 	else if (!strcmp (fname, "mgd77")) {
 		X->read_file = &x2sys_read_mgd77file;
 		X->geographic = true;
 		X->geodetic = GMT_IS_0_TO_P360_RANGE;
-		X->dist_flag = 2;	/* Creat circle distances */
+		X->dist_flag = 2;	/* Create circle distances */
 		MGD77_Init (GMT, &M);	/* Initialize MGD77 Machinery */
 	}
 	else {
@@ -1197,11 +1197,11 @@ int x2sys_set_system (struct GMT_CTRL *GMT, char *TAG, struct X2SYS_INFO **S, st
 	}
 	x2sys_err_pass (GMT, x2sys_fclose (GMT, tag_file, fp), tag_file);
 
-	if (B->time_gap < 0.0) {
+	if (B->time_gap <= 0.0) {
 		GMT_Report (GMT->parent, GMT_MSG_NORMAL, "Error -Wt: maximum gap must be > 0!\n");
 		return (X2SYS_BAD_ARG);
 	}
-	if (B->dist_gap < 0.0) {
+	if (B->dist_gap <= 0.0) {
 		GMT_Report (GMT->parent, GMT_MSG_NORMAL, "Error -Wd: maximum gap must be > 0!\n");
 		return (X2SYS_BAD_ARG);
 	}
