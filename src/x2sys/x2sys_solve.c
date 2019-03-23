@@ -295,7 +295,7 @@ int GMT_x2sys_solve (void *V_API, int mode, void *args) {
 	bool grow_list = false, normalize = false, first = true, active_col[N_COE_PARS];
 	int *ID[2] = {NULL, NULL}, ks, t, error = GMT_NOERROR, max_len;
 	int min_ID, max_ID;
-	unsigned int rec_mode;
+	unsigned int rec_mode, off;
 	uint64_t n_par = 0, n_in = 0, n, m, n_tracks = 0, n_active, n_constraints = 0;
 	uint64_t i, p, j, k, r, s, row_off, row, n_COE = 0, w_col, id_col, bin_expect, *R = NULL, *col_off = NULL, *cluster = NULL;
 	size_t n_alloc = GMT_INITIAL_MEM_ROW_ALLOC, n_alloc_t = GMT_CHUNK;
@@ -410,8 +410,8 @@ int GMT_x2sys_solve (void *V_API, int mode, void *args) {
 		trk_list = gmt_M_memory (GMT, NULL, n_alloc_t, char *);
 	}
 
-	bin_expect = n_in + 2;
-	w_col = n_in - 1;
+	bin_expect = n_in + 2;	/* Need two extra trailing columns to store the binary IDs of the two tracks */
+	w_col = n_in - 1;	/* Weight, if given, will be in the input last column */
 	id_col = w_col;
 	min_ID = INT_MAX;	max_ID = -INT_MAX;
 
@@ -430,17 +430,19 @@ int GMT_x2sys_solve (void *V_API, int mode, void *args) {
 		Return (API->error);
 	}
 	
+	off = (GMT->common.b.active[GMT_IN]) ? 2 : 0;	/* Start of crossover column data */
+	
 	/* Read the crossover file */
 
 	n_COE = 0;
 	do {	/* Keep returning records until we have no more files */
 		if ((In = GMT_Get_Record (API, GMT_READ_DATA, NULL)) == NULL) {	/* Keep returning records until we have no more files */
-			if (gmt_M_rec_is_error (GMT)) {
+			if (gmt_M_rec_is_error (GMT)) {	/* Should not happen... */
 				gmt_M_free (GMT, trk_list);
 				Return (GMT_RUNTIME_ERROR);
 			}
-			if (gmt_M_rec_is_table_header (GMT)) {
-				if (first) {
+			else if (gmt_M_rec_is_table_header (GMT)) {	/* The initial header record, of which the first is essental */
+				if (first) {	/* Get tag and data column name */
 					sscanf (&GMT->current.io.curr_text[6], "%s %s", file_TAG, file_column);
 					if (strcmp (Ctrl->T.TAG, file_TAG) && strcmp (Ctrl->C.col, file_column)) {
 						GMT_Report (API, GMT_MSG_NORMAL,
@@ -450,33 +452,32 @@ int GMT_x2sys_solve (void *V_API, int mode, void *args) {
 					}
 					first = false;
 				}
-				continue;
 			}
-			if (gmt_M_rec_is_eof (GMT)) 		/* Reached end of file */
+			else if (gmt_M_rec_is_eof (GMT))	/* Reached end of file */
 				break;
-		}
-		in = In->data;
-		if (In->text) {
-			if ((ks = sscanf (In->text, "%s %s", trk[0], trk[1])) != 2) {
-				GMT_Report (API, GMT_MSG_NORMAL, "Could not decode two track IDs - skipping record\n");
-				continue;
-			}
-			for (i = 0; i < 2; i++) {	/* Look up track IDs */
-				ID[i][n_COE] = x2sys_find_track (GMT, trk[i], trk_list, (unsigned int)n_tracks);	/* Return track id # for this leg */
-				if (ID[i][n_COE] == -1) {	/* Leg not in the data base yet */
-					if (grow_list) {	/* Add it */
-						trk_list[n_tracks] = strdup (trk[i]);
-						ID[i][n_COE] = (int)n_tracks++;
-						if (n_tracks == n_alloc_t) {
-							n_alloc_t <<= 1;
-							trk_list = gmt_M_memory (GMT, trk_list, n_alloc_t, char *);
+			else if (gmt_M_rec_is_segment_header (GMT)) {	/* Parse segment headers to get the two tracks IDs */
+				if ((ks = sscanf (GMT->current.io.segment_header, "%s %s", trk[0], trk[1])) != 2) {
+					GMT_Report (API, GMT_MSG_NORMAL, "Could not decode two track IDs - skipping record\n");
+					continue;
+				}
+				for (i = 0; i < 2; i++) {	/* Look up track IDs */
+					ID[i][n_COE] = x2sys_find_track (GMT, trk[i], trk_list, (unsigned int)n_tracks);	/* Return track id # for this leg */
+					if (ID[i][n_COE] == -1) {	/* Leg not in the data base yet */
+						if (grow_list) {	/* Add it */
+							trk_list[n_tracks] = strdup (trk[i]);
+							ID[i][n_COE] = (int)n_tracks++;
+							if (n_tracks == n_alloc_t) {
+								n_alloc_t <<= 1;
+								trk_list = gmt_M_memory (GMT, trk_list, n_alloc_t, char *);
+							}
 						}
 					}
 				}
 			}
-			
+			continue;	/* Back up to get the next record */
 		}
-		else {	/* Binary file with integer IDs */
+		in = In->data;		/* Here we have a data record so can set in to point to the numerical record */
+		if (GMT->common.b.active[GMT_IN]) {	/* Binary input means no segment header and track IDs are given in the first two columns */
 			for (i = 0; i < 2; i++) {	/* Get IDs and keept track of min/max values */
 				ID[i][n_COE] = irint (in[i+id_col]);
 				if (ID[i][n_COE] < min_ID) min_ID = ID[i][n_COE];
@@ -486,32 +487,32 @@ int GMT_x2sys_solve (void *V_API, int mode, void *args) {
 		/* Handle input order differently depending on what is expected */
 		switch (Ctrl->E.mode) {
 			case F_IS_CONSTANT:
-				data[COL_COE][n_COE] = in[0];
+				data[COL_COE][n_COE] = in[off];
 				break;
 			case F_IS_DRIFT_T:
-				data[COL_T1][n_COE]  = in[0];
-				data[COL_T2][n_COE]  = in[1];
-				data[COL_COE][n_COE] = in[2];
+				data[COL_T1][n_COE]  = in[off];
+				data[COL_T2][n_COE]  = in[off+1];
+				data[COL_COE][n_COE] = in[off+2];
 				break;
 			case F_IS_DRIFT_D:
-				data[COL_D1][n_COE]  = in[0];
-				data[COL_D2][n_COE]  = in[1];
-				data[COL_COE][n_COE] = in[2];
+				data[COL_D1][n_COE]  = in[off];
+				data[COL_D2][n_COE]  = in[off+1];
+				data[COL_COE][n_COE] = in[off+2];
 				break;
 			case F_IS_GRAV1930:
-				data[COL_YY][n_COE]  = in[0];
-				data[COL_COE][n_COE] = in[1];
+				data[COL_YY][n_COE]  = in[off];
+				data[COL_COE][n_COE] = in[off+1];
 				break;
 			case F_IS_HEADING:
-				data[COL_H1][n_COE]  = in[0];
-				data[COL_H2][n_COE]  = in[1];
-				data[COL_COE][n_COE] = in[2];
+				data[COL_H1][n_COE]  = in[off];
+				data[COL_H2][n_COE]  = in[off+1];
+				data[COL_COE][n_COE] = in[off+2];
 				break;
 			case F_IS_SCALE:
 			case F_IS_SCALE_OFF:
-				data[COL_Z1][n_COE]  = in[0];
-				data[COL_Z2][n_COE]  = in[1];
-				data[COL_COE][n_COE] = in[0] - in[1];
+				data[COL_Z1][n_COE]  = in[off];
+				data[COL_Z2][n_COE]  = in[off+1];
+				data[COL_COE][n_COE] = in[off] - in[off+1];
 				break;
 		}
 		data[COL_WW][n_COE] = (Ctrl->W.active) ? in[w_col] : 1.0;	/* Weight */
